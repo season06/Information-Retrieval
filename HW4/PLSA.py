@@ -35,133 +35,153 @@ def openFile():
 
 def cal_tf(doc_dict):
     tf_dict = {}   # tf[doc][word]
-    word_dict = {} # count number of word
+    word_dict = {} # word: count
+    all_word_len = 0
     
     for doc_name, doc in doc_dict.items(): # 讀取 key value
         tf_dict[doc_name] = {}
-        for word in doc.split(' '):        # 將 document 拆成 word
+        all_word_len += len(doc.split(' '))
+        
+        for word in doc.split(' '):        # 將 document 的內容拆成 token
+                
             if tf_dict[doc_name].get(word, 0):  # 計算 tf
                 tf_dict[doc_name][word] += 1
             else:
                 tf_dict[doc_name][word] = 1
+                
+            if word_dict.get(word, 0):  # 計算 tf
+                word_dict[word] += 1
+            else:
                 word_dict[word] = 1
         
-    return tf_dict, word_dict
+    return tf_dict, word_dict, all_word_len
 
-def initialParameter(doc_list, word_list, K):
-    gamma = {} # gamma[K][word]
-    delta = {} # delta[doc][K]
+def initialParameter(doc_len, word_len, K):
+    T_w = np.random.random([K, word_len])
+    d_T = np.random.random([doc_len, K])
     
     for k in range(0, K):
-        tmp = [random.random() for _ in range(0, len(word_list))]
-        normalize = sum(tmp)
-        gamma[k] = {word: tmp[i] / normalize for i, word in enumerate(word_list)}
-            
-    
-    for j, doc in enumerate(doc_list):
-        tmp = [random.random() for _ in range(0, K)]
-        normalize = sum(tmp)
-        delta[doc] = {k: tmp[k] / normalize for k in range(0, K)}
-    
-    return gamma, delta
+        normalization = sum(T_w[k, :])
+        for i in range(0, word_len):
+            T_w[k, i] /= normalization
 
-def EStep(doc_list, word_list, K, gamma, delta, e_step):
+    for j in range(0, doc_len):
+        normalization = sum(d_T[j, :])
+        for k in range(0, K):
+            d_T[j, k] /= normalization
+            
+    return T_w, d_T
+
+def EStep(doc_len, word_len, tf_dict, K, T_w, d_T, e_step):
+    print('EStep: ', time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())))
     
-    for doc in doc_list:
-        e_step[doc] = {}
-        for word in word_list:
-            e_step[doc][word] = {}
+    for i in range(0, doc_len):
+        for j in range(0, word_len):
+            
+            doc, word = doc_list[i], word_list[j]
+            if not tf_dict[doc].get(word, 0):
+                continue
+                
             denominator = 0
             
             for k in range(0, K):
-                e_step[doc][word][k] = gamma[k][word] * delta[doc][k]
-                denominator += e_step[doc][word][k]
+                e_step[i][j][k] = T_w[k][j] * d_T[i][k]
+                denominator += e_step[i][j][k]
                 
             if denominator == 0:
                 for k in range(0, K):
-                    e_step[doc][word][k] = 0
+                    e_step[i][j][k] = 0
             else:
                 for k in range(0, K):
-                    e_step[doc][word][k] /= denominator
+                    e_step[i][j][k] /= denominator
     
     return e_step
 
-def MStep(doc_list, word_list, tf_dict, K, gamma, delta, e_step):
-    ### update gamma : p(wi|Tk)
+def MStep(doc_len, word_len, tf_dict, K, T_w, d_T, e_step):
+    print('MStep: ', time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())))
+    
+    ### update T_w : p(wi|Tk)
     for k in range(0, K):
         denominator = 0
         
-        for word in word_list:
-            gamma[k][word] = 0
+        for j in range(0, word_len):
+            T_w[k][j] = 0
             
-            for doc in doc_list:
-                gamma[k][word] += tf_dict[doc].get(word, 0) * e_step[doc][word][k]
-            denominator += gamma[k][word]
+            for i in range(0, doc_len):
+                doc, word = doc_list[i], word_list[j]
+                if tf_dict[doc].get(word, 0):
+                    T_w[k][j] += tf_dict[doc][word] * e_step[i][j][k]
+            denominator += T_w[k][j]
             
         if denominator == 0:
-            for word in word_list:
-                gamma[k][word] = 1.0 / len(word_list)
+            for j in word_len:
+                T_w[k][j] = 1.0 / word_len
         else:
-            for word in word_list:
-                gamma[k][word] /= denominator
+            for j in range(0, word_len):
+                T_w[k][j] /= denominator
                 
-    ### update delta : p(Tk|dj)
-    for doc in doc_list:
+    ### update d_T : p(Tk|dj)
+    for i in range(0, doc_len):
         for k in range(0, K):
-            delta[doc][k] = 0
+            d_T[i][k] = 0
             denominator = 0
             
-            for word in word_list:
-                delta[doc][k] += tf_dict[doc].get(word, 0) * e_step[doc][word][k]
-                denominator += tf_dict[doc].get(word, 0)
+            for j in range(0, word_len):
+                doc, word = doc_list[i], word_list[j]
+                if tf_dict[doc].get(word, 0):
+                    d_T[i][k] += tf_dict[doc][word] * e_step[i][j][k]
+                    denominator += tf_dict[doc][word]
                 
             if denominator == 0:
-                delta[doc][k] = 1.0 / K
+                d_T[i][k] = 1.0 / K
             else:
-                delta[doc][k] /= denominator
+                d_T[i][k] /= denominator
                 
-    return gamma, delta
+    return T_w, d_T
 
-def Likelihood(doc_list, word_list, tf_dict, K, gamma, delta):
+def Likelihood(doc_len, word_len, tf_dict, K, T_w, d_T):
     likelihood = 0
     
-    for doc in doc_list:
-        for word in word_list:
+    for i in range(0, doc_len):
+        for j in range(0, word_len):
             tmp = 0
             
             for k in range(0, K):
-                tmp += gamma[k][word] * delta[doc][k]
+                tmp += T_w[k][j] * d_T[i][k]
                 
             if tmp > 0:
-                likelihood += tf_dict[doc].get(word, 0) * math.log(tmp, 10)
+                doc, word = doc_list[i], word_list[j]
+                if tf_dict[doc].get(word, 0):
+                    likelihood += tf_dict[doc][word] * math.log(tmp, 10)
                 
     return likelihood
 
-def EM_algorithm(doc_list, word_list, tf_dict, K, gamma, delta):
-    iteration = 100
-    threshold = 0.001
-    oldLikelihood = 1
-    newLikelihood = 1
-    e_step = {}
-    
-    for i in range(0, iteration):
-        e_step = EStep(doc_list, word_list, K, gamma, delta, e_step)
-        gamma, delta = MStep(doc_list, word_list, tf_dict, K, gamma, delta, e_step)
-        newLikelihood = Likelihood(doc_list, word_list, tf_dict, K, gamma, delta)
-        
-        print("[", time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())), "] ", i+1, " iteration  ", str(newLikelihood))
-        
-        if(oldLikelihood != 1 and newLikelihood - oldLikelihood < threshold):
-            break
-        oldLikelihood = newLikelihood
-    
-    return gamma, delta
+def EM_algorithm(doc_len, word_len, tf_dict, K, T_w, d_T, e_step):
+    Iteration = 20
+    threshold = 100.0
+    oldLoglikelihood = 1
+    newLoglikelihood = 1
 
-def PLSA_model(query, doc_dict, tf_dict, K, gamma, delta):
-    alpha, beta = 0.6, 0.4
+    for i in range(0, Iteration):
+        e_step = EStep(doc_len, word_len, tf_dict, K, T_w, d_T, e_step)
+        T_w, d_T = MStep(doc_len, word_len, tf_dict, K, T_w, d_T, e_step)
+        newLoglikelihood = Likelihood(doc_len, word_len, tf_dict, K, T_w, d_T)
+        
+        print("[", time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())), "] ", i+1, " iteration  ", str(newLoglikelihood))
+        
+        if(oldLoglikelihood != 1 and newLoglikelihood - oldLoglikelihood < threshold):
+            break
+        oldLoglikelihood = newLoglikelihood
+    
+    return T_w, d_T
+
+def PLSA_model(query, doc_dict, tf_dict, BG_word, K, T_w, d_T):
+    alpha, beta = 0.8, 0.2
     score_dict = {}
     
-    for doc_name, doc in doc_dict.items():
+    for i in range(0, len(doc_list)):
+        doc_name = doc_list[i]
+        doc = doc_dict[doc_name]
         doc_len = len(doc)
         score = 0
         
@@ -169,12 +189,13 @@ def PLSA_model(query, doc_dict, tf_dict, K, gamma, delta):
             tf = tf_dict[doc_name].get(word, 0)  # 將 word 轉成 score
             
             tmp = 0
+            id_word = word2id[word]
             for k in range(0, K):
-                tmp += gamma[k][word] * delta[doc_name][k]
+                tmp += T_w[k][id_word] * d_T[i][k]
             
             first = alpha * (tf / doc_len)
             second = beta * tmp
-            third = (1 - alpha - beta) * (tf / doc_len)
+            third = (1 - alpha - beta) * BG_word[word]
             
             score = first + second + third
             
@@ -183,33 +204,61 @@ def PLSA_model(query, doc_dict, tf_dict, K, gamma, delta):
     rank = sorted(score_dict.items(), key=lambda x: x[1], reverse = True) # 根據分數做排序
     return rank
 
+### Open file
 query_dict, doc_dict = openFile()
 
-tf_dict, word_dict = cal_tf(doc_dict)
+### Calculate tf & word count & total word length
+tf_dict, word_dict, all_word_len = cal_tf(doc_dict)
+print(all_word_len)
 
-## use query word as word_dict
-word_dict = {}
-for _id, _query in query_dict.items():
-    for word in _query.split(' '):
-        word_dict[word] = 1
+### New word dict: select word if word in query or tf > 30
+new_word_dict = {}
+word2id = {}
+i = 0
 
+query_word = []
+for _, value in query_dict.items():
+    query_word.append(value.split(' '))
+query_word = sum(query_word, [])
+
+# select word if word in query or tf > 30
+for word in list(word_dict.keys()):
+    if word in query_word or word_dict[word] > 40:
+        new_word_dict[word] = word_dict[word]
+
+        word2id[word] = i
+        i += 1
+
+print(len(new_word_dict))
+
+### Calculate BG word
+BG_word = {}
+for word, count in new_word_dict.items():
+    BG_word[word] = count / all_word_len
+
+### Parameters
 doc_list, word_list = list(doc_dict.keys()), list(word_dict.keys())
+doc_len, word_len = len(doc_dict), len(new_word_dict)
+K = 16  # number of TOPIC
 
-# number of TOPIC
-K = 64
-
-# gamma[topic][word] : p(wi|Tk)
-# delta[doc][topic] : p(Tk|dj)
+# T_W[topic][word] : p(wi|Tk)
+# D_T[doc][topic] : p(Tk|dj)
 # e_step[doc][word][topic] : p(Tk|wi,dj)
-gamma, delta = initialParameter(doc_list, word_list, K)
+T_w, d_T = initialParameter(doc_len, word_len, K)
+e_step = np.zeros([doc_len,word_len,K])
+print(T_w.shape)
+print(d_T.shape)
+print(e_step.shape)
 
-gamma, delta = EM_algorithm(doc_list, word_list, tf_dict, K, gamma, delta)
+### EM algorithm
+T_w, d_T = EM_algorithm(doc_len, word_len, tf_dict, K, T_w, d_T, e_step)
 
+### Training model & Save answer
 f = open('ans.txt', 'w')
 string = 'Query,RetrievedDocuments\n'
 
 for _id, _query in query_dict.items():
-    rank = PLSA_model(_query, doc_dict, tf_dict, K, gamma, delta)
+    rank = PLSA_model(_query, doc_dict, tf_dict, BG_word, K, T_w, d_T)
 
     string += _id + ','
     for i, doc in enumerate(rank):
