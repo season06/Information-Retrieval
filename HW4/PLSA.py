@@ -50,28 +50,22 @@ def cal_word_count(doc_dict):
 
 def cal_tf(doc_dict, new_word_dict):
     tf_dict = {}   # tf[doc_index][word]
-    word2id =  {}  # 對應, used in EM algorithm
-    id2word = {}   # 對應, used in query
     id2doc = {}   # 對應, used in write file
-    
-    doc_index, word_index = 0, 0
+    index = 0
     
     for doc_name, doc in doc_dict.items():
-        tf_dict[doc_index] = {}
-        id2doc[doc_index] = doc_name
+        tf_dict[index] = {}
+        id2doc[index] = doc_name
         
         for word in doc.split(' '):
             if new_word_dict.get(word, 0): # 如果在 new word dict, 才計算 tf
-                if tf_dict[doc_index].get(word, 0):
-                    tf_dict[doc_index][word] += 1
+                if tf_dict[index].get(word, 0):
+                    tf_dict[index][word] += 1
                 else:
-                    tf_dict[doc_index][word] = 1
-                    word2id[word] = word_index   # 初始化後建對應表
-                    id2word[word_index] = word
-                    word_index += 1
-        doc_index += 1
-        
-    return tf_dict, word2id, id2word, id2doc
+                    tf_dict[index][word] = 1
+        index += 1
+
+    return tf_dict, id2doc
 
 def initialParameter(doc_len, word_len, K):
     T_w = np.random.random([K, word_len])
@@ -219,7 +213,6 @@ def PLSA_model(query, doc_dict, tf_dict, BG_word, K, T_w, d_T):
     
     rank = sorted(score_dict.items(), key=lambda x: x[1], reverse = True) # 根據分數做排序
     return rank
-
 ### Open file
 query_dict, doc_dict = openFile()
 
@@ -237,14 +230,22 @@ query_word = sum(query_word, [])
 
 # select word if word in query or tf > 40
 new_word_dict = {}
+word2id = {}  # 對應, used in query
+id2word = {}   # 對應, used in EM algorithm
+index = 0
+
 for word in list(word_dict.keys()):
-    if word in query_word or (word_dict[word] > 30 and len(word) > 1):
+    if word in query_word or (word_dict[word] > 50 and len(word) > 1):
         new_word_dict[word] = word_dict[word]
+        
+        word2id[word] = index
+        id2word[index] = word
+        index += 1
 
 print(len(new_word_dict))
 
 ### Calculate tf & build mapping dict
-tf_dict, word2id, id2word, id2doc = cal_tf(doc_dict, new_word_dict)
+tf_dict, id2doc = cal_tf(doc_dict, new_word_dict)
 
 ### Calculate BG word
 BG_word = {}
@@ -269,6 +270,8 @@ print(e_step.shape)
 
 ### EM algorithm
 T_w, d_T = EM_algorithm(doc_len, word_len, tf_dict, K, T_w, d_T, e_step)
+np.save('./numpy/T_w', T_w)
+np.save('./numpy/d_T',d_T)
 
 ### Training model & Save answer
 f = open('ans.txt', 'w')
