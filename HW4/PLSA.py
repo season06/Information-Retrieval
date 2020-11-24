@@ -83,7 +83,7 @@ def initialParameter(doc_len, word_len, K):
             
     return T_w, d_T
 
-def EStep(doc_len, word_len, tf_dict, K, T_w, d_T, e_step):
+def EStep():
     print('EStep: ', time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())))
     
     for i in range(0, doc_len):
@@ -108,7 +108,7 @@ def EStep(doc_len, word_len, tf_dict, K, T_w, d_T, e_step):
     
     return e_step
 
-def MStep(doc_len, word_len, tf_dict, K, T_w, d_T, e_step):
+def MStep():
     print('MStep: ', time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())))
     
     ### update T_w : p(wi|Tk)
@@ -117,15 +117,15 @@ def MStep(doc_len, word_len, tf_dict, K, T_w, d_T, e_step):
         
         for j in range(0, word_len):
             T_w[k][j] = 0
+            word = id2word[j]
             
             for i in range(0, doc_len):
-                word = id2word[j]
                 if tf_dict[i].get(word, 0):
                     T_w[k][j] += tf_dict[i][word] * e_step[i][j][k]
             denominator += T_w[k][j]
             
         if denominator == 0:
-            for j in word_len:
+            for j in range(0, word_len):
                 T_w[k][j] = 1.0 / word_len
         else:
             for j in range(0, word_len):
@@ -147,59 +147,58 @@ def MStep(doc_len, word_len, tf_dict, K, T_w, d_T, e_step):
                 d_T[i][k] = 1.0 / K
             else:
                 d_T[i][k] /= denominator
-                
-    return T_w, d_T
 
-def Likelihood(doc_len, word_len, tf_dict, K, T_w, d_T):
+def Likelihood():
     likelihood = 0
     
     for i in range(0, doc_len):
         for j in range(0, word_len):
-            tmp = 0
             
+            word = id2word[j]
+            if not tf_dict[i].get(word, 0):
+                continue
+                
+            tmp = 0
             for k in range(0, K):
                 tmp += T_w[k][j] * d_T[i][k]
                 
             if tmp > 0:
-                word = id2word[j]
-                if tf_dict[i].get(word, 0):
-                    likelihood += tf_dict[i][word] * math.log(tmp, 10)
+                likelihood += tf_dict[i][word] * math.log(tmp)
                 
     return likelihood
 
-def EM_algorithm(doc_len, word_len, tf_dict, K, T_w, d_T, e_step):
+def EM_algorithm():
     Iteration = 20
     threshold = 100.0
-    oldLoglikelihood = 1
-    newLoglikelihood = 1
+    oldlikelihood = 1
+    newlikelihood = 1
 
     for i in range(0, Iteration):
-        e_step = EStep(doc_len, word_len, tf_dict, K, T_w, d_T, e_step)
-        T_w, d_T = MStep(doc_len, word_len, tf_dict, K, T_w, d_T, e_step)
-        newLoglikelihood = Likelihood(doc_len, word_len, tf_dict, K, T_w, d_T)
+        EStep()
+        MStep()
+        newlikelihood = Likelihood()
         
-        print("[", time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())), "] ", i+1, " iteration  ", str(newLoglikelihood))
+        print("[", time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())), "] ", i+1, " iteration  ", str(newlikelihood))
         
-        if(oldLoglikelihood != 1 and newLoglikelihood - oldLoglikelihood < threshold):
+        if ((oldlikelihood != 1) and (newlikelihood - oldlikelihood < threshold)):
             break
-        oldLoglikelihood = newLoglikelihood
-    
-    return T_w, d_T
+        oldlikelihood = newlikelihood
+
 
 def PLSA_model(query, doc_dict, tf_dict, BG_word, K, T_w, d_T):
-    alpha, beta = 0.8, 0.2
+    alpha, beta = 0.9, 0.1
     score_dict = {}
     
     for i in range(0, doc_len):
         doc_name = id2doc[i]
         doc = doc_dict[doc_name]
-        score = 0
+        score = 1
         
         for word in query.split(' '):
             tf = tf_dict[i].get(word, 0)  # 將 word 轉成 score
             
             tmp = 0
-            id_word = word2id[word]
+            id_word = word2id[word] 
             for k in range(0, K):
                 tmp += T_w[k][id_word] * d_T[i][k]
             
@@ -207,12 +206,13 @@ def PLSA_model(query, doc_dict, tf_dict, BG_word, K, T_w, d_T):
             second = beta * tmp
             third = (1 - alpha - beta) * BG_word[word]
             
-            score = first + second + third
+            score *= (first + second + third)
             
         score_dict[doc_name] = score
     
     rank = sorted(score_dict.items(), key=lambda x: x[1], reverse = True) # 根據分數做排序
     return rank
+
 ### Open file
 query_dict, doc_dict = openFile()
 
@@ -235,7 +235,7 @@ id2word = {}   # 對應, used in EM algorithm
 index = 0
 
 for word in list(word_dict.keys()):
-    if word in query_word or (word_dict[word] > 50 and len(word) > 1):
+    if word in query_word or (word_dict[word] > 30 and len(word) > 1):
         new_word_dict[word] = word_dict[word]
         
         word2id[word] = index
@@ -256,7 +256,7 @@ for word, count in new_word_dict.items():
 doc_len, word_len = len(doc_dict), len(new_word_dict)
 
 # number of TOPIC
-K = 8
+K = 16
 
 # T_W[topic][word] : p(wi|Tk)
 # D_T[doc][topic] : p(Tk|dj)
@@ -269,7 +269,7 @@ e_step = np.zeros([doc_len,word_len,K])
 print(e_step.shape)
 
 ### EM algorithm
-T_w, d_T = EM_algorithm(doc_len, word_len, tf_dict, K, T_w, d_T, e_step)
+EM_algorithm()
 np.save('./numpy/T_w', T_w)
 np.save('./numpy/d_T',d_T)
 
