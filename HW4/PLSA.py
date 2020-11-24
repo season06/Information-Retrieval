@@ -52,11 +52,13 @@ def cal_tf(doc_dict, new_word_dict):
     tf_dict = {}   # tf[doc_index][word]
     word2id =  {}  # 對應, used in EM algorithm
     id2word = {}   # 對應, used in query
+    id2doc = {}   # 對應, used in write file
     
     doc_index, word_index = 0, 0
     
-    for _, doc in doc_dict.items():
+    for doc_name, doc in doc_dict.items():
         tf_dict[doc_index] = {}
+        id2doc[doc_index] = doc_name
         
         for word in doc.split(' '):
             if new_word_dict.get(word, 0): # 如果在 new word dict, 才計算 tf
@@ -69,7 +71,7 @@ def cal_tf(doc_dict, new_word_dict):
                     word_index += 1
         doc_index += 1
         
-    return tf_dict, word2id, id2word
+    return tf_dict, word2id, id2word, id2doc
 
 def initialParameter(doc_len, word_len, K):
     T_w = np.random.random([K, word_len])
@@ -195,7 +197,7 @@ def PLSA_model(query, doc_dict, tf_dict, BG_word, K, T_w, d_T):
     score_dict = {}
     
     for i in range(0, doc_len):
-        doc_name = doc_list[i]
+        doc_name = id2doc[i]
         doc = doc_dict[doc_name]
         score = 0
         
@@ -236,13 +238,13 @@ query_word = sum(query_word, [])
 # select word if word in query or tf > 40
 new_word_dict = {}
 for word in list(word_dict.keys()):
-    if word in query_word or word_dict[word] > 40:
+    if word in query_word or (word_dict[word] > 30 and len(word) > 1):
         new_word_dict[word] = word_dict[word]
 
 print(len(new_word_dict))
 
 ### Calculate tf & build mapping dict
-tf_dict, word2id, id2word = cal_tf(doc_dict, new_word_dict)
+tf_dict, word2id, id2word, id2doc = cal_tf(doc_dict, new_word_dict)
 
 ### Calculate BG word
 BG_word = {}
