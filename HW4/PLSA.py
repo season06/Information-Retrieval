@@ -33,28 +33,43 @@ def openFile():
     
     return query, doc
 
-def cal_tf(doc_dict):
-    tf_dict = {}   # tf[doc][word]
-    word_dict = {} # word: count
-    all_word_len = 0
-    
-    for doc_name, doc in doc_dict.items(): # 讀取 key value
-        tf_dict[doc_name] = {}
+def cal_word_count(doc_dict):
+    word_dict = {}   # word: count
+    all_word_len = 0 # 計算 total word length in document
+
+    for doc_name, doc in doc_dict.items():
         all_word_len += len(doc.split(' '))
         
-        for word in doc.split(' '):        # 將 document 的內容拆成 token
-                
-            if tf_dict[doc_name].get(word, 0):  # 計算 tf
-                tf_dict[doc_name][word] += 1
-            else:
-                tf_dict[doc_name][word] = 1
-                
-            if word_dict.get(word, 0):  # 計算 tf
+        for word in doc.split(' '):
+            if word_dict.get(word, 0):
                 word_dict[word] += 1
             else:
                 word_dict[word] = 1
         
-    return tf_dict, word_dict, all_word_len
+    return word_dict, all_word_len
+
+def cal_tf(doc_dict, new_word_dict):
+    tf_dict = {}   # tf[doc_index][word]
+    word2id =  {}  # 對應, used in EM algorithm
+    id2word = {}   # 對應, used in query
+    
+    doc_index, word_index = 0, 0
+    
+    for _, doc in doc_dict.items():
+        tf_dict[doc_index] = {}
+        
+        for word in doc.split(' '):
+            if new_word_dict.get(word, 0): # 如果在 new word dict, 才計算 tf
+                if tf_dict[doc_index].get(word, 0):
+                    tf_dict[doc_index][word] += 1
+                else:
+                    tf_dict[doc_index][word] = 1
+                    word2id[word] = word_index   # 初始化後建對應表
+                    id2word[word_index] = word
+                    word_index += 1
+        doc_index += 1
+        
+    return tf_dict, word2id, id2word
 
 def initialParameter(doc_len, word_len, K):
     T_w = np.random.random([K, word_len])
@@ -78,8 +93,8 @@ def EStep(doc_len, word_len, tf_dict, K, T_w, d_T, e_step):
     for i in range(0, doc_len):
         for j in range(0, word_len):
             
-            doc, word = doc_list[i], word_list[j]
-            if not tf_dict[doc].get(word, 0):
+            word = id2word[j]
+            if not tf_dict[i].get(word, 0):
                 continue
                 
             denominator = 0
@@ -108,9 +123,9 @@ def MStep(doc_len, word_len, tf_dict, K, T_w, d_T, e_step):
             T_w[k][j] = 0
             
             for i in range(0, doc_len):
-                doc, word = doc_list[i], word_list[j]
-                if tf_dict[doc].get(word, 0):
-                    T_w[k][j] += tf_dict[doc][word] * e_step[i][j][k]
+                word = id2word[j]
+                if tf_dict[i].get(word, 0):
+                    T_w[k][j] += tf_dict[i][word] * e_step[i][j][k]
             denominator += T_w[k][j]
             
         if denominator == 0:
@@ -127,10 +142,10 @@ def MStep(doc_len, word_len, tf_dict, K, T_w, d_T, e_step):
             denominator = 0
             
             for j in range(0, word_len):
-                doc, word = doc_list[i], word_list[j]
-                if tf_dict[doc].get(word, 0):
-                    d_T[i][k] += tf_dict[doc][word] * e_step[i][j][k]
-                    denominator += tf_dict[doc][word]
+                word = id2word[j]
+                if tf_dict[i].get(word, 0):
+                    d_T[i][k] += tf_dict[i][word] * e_step[i][j][k]
+                    denominator += tf_dict[i][word]
                 
             if denominator == 0:
                 d_T[i][k] = 1.0 / K
@@ -150,9 +165,9 @@ def Likelihood(doc_len, word_len, tf_dict, K, T_w, d_T):
                 tmp += T_w[k][j] * d_T[i][k]
                 
             if tmp > 0:
-                doc, word = doc_list[i], word_list[j]
-                if tf_dict[doc].get(word, 0):
-                    likelihood += tf_dict[doc][word] * math.log(tmp, 10)
+                word = id2word[j]
+                if tf_dict[i].get(word, 0):
+                    likelihood += tf_dict[i][word] * math.log(tmp, 10)
                 
     return likelihood
 
@@ -179,21 +194,20 @@ def PLSA_model(query, doc_dict, tf_dict, BG_word, K, T_w, d_T):
     alpha, beta = 0.8, 0.2
     score_dict = {}
     
-    for i in range(0, len(doc_list)):
+    for i in range(0, doc_len):
         doc_name = doc_list[i]
         doc = doc_dict[doc_name]
-        doc_len = len(doc)
         score = 0
         
         for word in query.split(' '):
-            tf = tf_dict[doc_name].get(word, 0)  # 將 word 轉成 score
+            tf = tf_dict[i].get(word, 0)  # 將 word 轉成 score
             
             tmp = 0
             id_word = word2id[word]
             for k in range(0, K):
                 tmp += T_w[k][id_word] * d_T[i][k]
             
-            first = alpha * (tf / doc_len)
+            first = alpha * (tf / len(doc))
             second = beta * tmp
             third = (1 - alpha - beta) * BG_word[word]
             
@@ -207,29 +221,28 @@ def PLSA_model(query, doc_dict, tf_dict, BG_word, K, T_w, d_T):
 ### Open file
 query_dict, doc_dict = openFile()
 
-### Calculate tf & word count & total word length
-tf_dict, word_dict, all_word_len = cal_tf(doc_dict)
+### Calculate word count & total word length
+word_dict, all_word_len = cal_word_count(doc_dict)
+
+print(len(word_dict))
 print(all_word_len)
 
-### New word dict: select word if word in query or tf > 30
-new_word_dict = {}
-word2id = {}
-i = 0
-
+### new word dict: 減少 word 的數量
 query_word = []
 for _, value in query_dict.items():
     query_word.append(value.split(' '))
 query_word = sum(query_word, [])
 
-# select word if word in query or tf > 30
+# select word if word in query or tf > 40
+new_word_dict = {}
 for word in list(word_dict.keys()):
     if word in query_word or word_dict[word] > 40:
         new_word_dict[word] = word_dict[word]
 
-        word2id[word] = i
-        i += 1
-
 print(len(new_word_dict))
+
+### Calculate tf & build mapping dict
+tf_dict, word2id, id2word = cal_tf(doc_dict, new_word_dict)
 
 ### Calculate BG word
 BG_word = {}
@@ -237,17 +250,19 @@ for word, count in new_word_dict.items():
     BG_word[word] = count / all_word_len
 
 ### Parameters
-doc_list, word_list = list(doc_dict.keys()), list(word_dict.keys())
 doc_len, word_len = len(doc_dict), len(new_word_dict)
-K = 16  # number of TOPIC
+
+# number of TOPIC
+K = 8
 
 # T_W[topic][word] : p(wi|Tk)
 # D_T[doc][topic] : p(Tk|dj)
 # e_step[doc][word][topic] : p(Tk|wi,dj)
 T_w, d_T = initialParameter(doc_len, word_len, K)
-e_step = np.zeros([doc_len,word_len,K])
 print(T_w.shape)
 print(d_T.shape)
+
+e_step = np.zeros([doc_len,word_len,K])
 print(e_step.shape)
 
 ### EM algorithm
